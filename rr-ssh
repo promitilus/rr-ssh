@@ -38,7 +38,7 @@ function rr_ssh() {
 	host="${dest%:*}";
 	port="${dest#*:}";
 	local -a ssh_args=("$@" "-o" "HostName=$host" "-o" "ConnectTimeout=$RR_SSH_CONNECT_TIMEOUT");
-	[ -n "$port" -o "$host" = "$port" ] && ssh_args=("${ssh_args[@]}" "-o" "Port=$port");
+	[ -n "$port" -a "$host" != "$port" ] && ssh_args=("${ssh_args[@]}" "-o" "Port=$port");
 
 	[ "$RR_SSH_VERBOSE" = "1" ] && echo "rr-ssh: executing ssh ${ssh_args[@]}" >&2;
 	ssh "${ssh_args[@]}";
@@ -90,8 +90,9 @@ function __main() {
 			status="$?";
 			time_stop=`date +%s`;
 
-			if [ "$?" -eq 0 ] && [ $(($time_stop - $time_stop)) -gt $RR_SSH_GATETIME ];
-			then	return 0;
+			if [ "$?" -eq 0 ] && [ $(($time_stop - $time_start)) -gt $RR_SSH_GATETIME ];
+			then
+				return 0;
 			fi;
 
 			[ -n "$RR_SSH_SLEEP" ] && sleep "$RR_SSH_SLEEP";
