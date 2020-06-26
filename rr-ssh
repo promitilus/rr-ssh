@@ -1,0 +1,86 @@
+#!/bin/bash
+
+
+# DEFAULTS
+RR_SSH_VERSION=0.1;
+RR_SSH_VERBOSE="${RR_SSH_VERBOSE:=1}";
+RR_SSH_HOSTS="${RR_SSH_HOSTS:=}";
+RR_SSH_DNS_SRV_PREFIX="${RR_SSH_DNS_SRV_PREFIX:=_ssh._tcp}";
+RR_SSH_GATETIME="${RR_SSH_GATETIME:=30}";
+RR_SSH_CONNECT_TIMEOUT="${RR_SSH_CONNECT_TIMEOUT:=15}";
+
+function rr_ssh() {
+	local dest="$1";shift;
+
+	host="${dest%:*}";
+	port="${dest#*:}";
+	local -a ssh_args=("$@" "-o" "HostName=$host" "-o" "Port=$port" "-o" "ConnectTimeout=$RR_SSH_CONNECT_TIMEOUT");
+
+	[ "$RR_SSH_VERBOSE" = "1" ] && echo "rr-ssh: executing ssh ${ssh_args[@]}" >&2;
+	ssh "${ssh_args[@]}";
+}
+
+function __dns_srv_resolve() {
+	nslookup -querytype=srv -nofail -retry=2 "$1." | grep -w "$1" | sort -k 5 -r | awk '{ print $7 ":" $6 }';
+}
+
+####
+# MAIN
+function __main() {
+	local -a hosts;
+
+	# discover hosts:
+	#	1. try to resolve their SRV record and add them to list
+	#	2. otherwise only add host to list
+	if [ -n "$RR_SSH_HOSTS" ];
+	then
+		for host in "$RR_SSH_HOSTS";
+		do
+			srvs=`__dns_srv_resolve "$RR_SSH_DNS_SRV_PREFIX.$host"`;
+			if [ -n "$srvs" ];
+			then	for srv in $srvs;
+				do
+					hosts=("${hosts[@]}" $srv);
+				done;
+			else
+				hosts=("${hosts[@]}" $host);
+			fi;
+		done;
+	else
+		hosts="";
+	fi;
+
+	if [ -n "$hosts" ];
+	then
+		# loop list of hosts
+		#	1. after successfull connect and disconnect exit script with success
+		#	2. otherwise loop try hosts
+		#	3. on no more hosts exit with failure
+		for host in ${hosts[@]};
+		do
+			time_start=`date +%s`;
+
+
+			rr_ssh "$host" "$@";
+
+			status="$?";
+			time_stop=`date +%s`;
+
+			if [ "$?" -eq 0 ] && [ $(($time_stop - $time_stop)) -gt $RR_SSH_GATETIME ];
+			then	exit 0;
+			fi;
+		done;
+
+		# None of eligible hosts responded
+		exit 1;
+	else
+		# Work as normal SSH
+		exec ssh "$@";
+	fi;
+}
+
+
+set -u;
+
+__main "$@";
+exit $?;
