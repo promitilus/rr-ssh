@@ -1,27 +1,51 @@
 #!/bin/bash
+#
+# PROGRAM	: rr-ssh
+# PURPOSE	: SSH wrapper for simple fault-tolerant remote connections
+#			and destiation discovery using DNS SRV records
+# AUTHOR	: Samuel Behan <samuel.behan(at)dob(dot)sk> (c) 2019-2020
+# HOMEPAGE	: https://github.com/promitilus/rr-ssh
+# LICENSE	: GNU GPL v3 or later (see file LICENSE)
+################################################################################
 
 
-# DEFAULTS
-RR_SSH_VERSION=0.1;
-RR_SSH_VERBOSE="${RR_SSH_VERBOSE:=1}";
+#############
+## DEFAULTS
+RR_SSH_VERSION=0.2;
+# RR_SSH_HOSTS		- space separated list of hosts, default empty
 RR_SSH_HOSTS="${RR_SSH_HOSTS:=}";
+# RR_SSH_VERBOSE	- 0 or 1, enable verbose logging, default 0
+RR_SSH_VERBOSE="${RR_SSH_VERBOSE:=0}";
+# RR_SSH_SLEEP		- number, sleep before switching host, default 0.11
+RR_SSH_SLEEP="${RR_SSH_SLEEP:=0.11}";
+# RR_SSH_DNS_SRV_PREFIX	- host prefix for SRV discover, default _ssh._tcp
 RR_SSH_DNS_SRV_PREFIX="${RR_SSH_DNS_SRV_PREFIX:=_ssh._tcp}";
+# RR_SSH_GATETIME	- integer, minimum connect time in seconds to consider connection successfull
 RR_SSH_GATETIME="${RR_SSH_GATETIME:=30}";
+# RR_SSH_CONNECT_TIMEOUT - integer, connection timeout, default 15
 RR_SSH_CONNECT_TIMEOUT="${RR_SSH_CONNECT_TIMEOUT:=15}";
+# RR_SSH_LOOP		- 0 or 1, restart connection forever
+RR_SSH_LOOP="${RR_SSH_LOOP:=0}";
+# RR_SSH_LOOP_SLEEP	- integer, minimum sleep in seconds between restart, default 1
+RR_SSH_LOOP_SLEEP="${RR_SSH_LOOP_SLEEP:=1}";
+# RR_SSH_LOOP_SLEEP_MAX	- integer, maximum sleep in seconds between restart, default 10
+RR_SSH_LOOP_SLEEP_MAX="${RR_SSH_LOOP_SLEEP_MAX:=10}";
+##############
 
 function rr_ssh() {
 	local dest="$1";shift;
 
 	host="${dest%:*}";
 	port="${dest#*:}";
-	local -a ssh_args=("$@" "-o" "HostName=$host" "-o" "Port=$port" "-o" "ConnectTimeout=$RR_SSH_CONNECT_TIMEOUT");
+	local -a ssh_args=("$@" "-o" "HostName=$host" "-o" "ConnectTimeout=$RR_SSH_CONNECT_TIMEOUT");
+	[ -n "$port" -o "$host" = "$port" ] && ssh_args=("${ssh_args[@]}" "-o" "Port=$port");
 
 	[ "$RR_SSH_VERBOSE" = "1" ] && echo "rr-ssh: executing ssh ${ssh_args[@]}" >&2;
 	ssh "${ssh_args[@]}";
 }
 
 function __dns_srv_resolve() {
-	nslookup -querytype=srv -nofail -retry=2 "$1." | grep -w "$1" | sort -k 5 -r | awk '{ print $7 ":" $6 }';
+	nslookup -querytype=srv -nofail -retry=2 "$1." | grep -w "^$1" | sort -k 5 -r | awk '{ print $7 ":" $6 }';
 }
 
 ####
@@ -67,20 +91,50 @@ function __main() {
 			time_stop=`date +%s`;
 
 			if [ "$?" -eq 0 ] && [ $(($time_stop - $time_stop)) -gt $RR_SSH_GATETIME ];
-			then	exit 0;
+			then	return 0;
 			fi;
+
+			[ -n "$RR_SSH_SLEEP" ] && sleep "$RR_SSH_SLEEP";
 		done;
 
 		# None of eligible hosts responded
-		exit 1;
+		return 1;
 	else
 		# Work as normal SSH
-		exec ssh "$@";
+		ssh "$@";
+		return $?;
 	fi;
 }
 
 
 set -u;
 
-__main "$@";
-exit $?;
+if [ "$RR_SSH_LOOP" = "1" ];
+then
+	round=0;
+	sleep="$RR_SSH_LOOP_SLEEP";
+	while true;
+	do
+		round=$(($round+1));
+
+		__main "$@";
+
+		if [ "$?" -eq 0 ];
+		then
+			sleep="$RR_SSH_LOOP_SLEEP";
+		else
+			sleep=$(($sleep + $RR_SSH_LOOP_SLEEP));
+			if [ "$sleep" -gt "$RR_SSH_LOOP_SLEEP_MAX" ];
+			then
+				sleep="$RR_SSH_LOOP_SLEEP_MAX";
+			fi;
+		fi;
+
+		# sleep backoff
+		[ "$RR_SSH_VERBOSE" = "1" ] && echo "rr-ssh: repeating loop, round=$round, sleep=$sleep" >&2;
+		[ -n "$sleep" ] && sleep "$sleep";
+	done;
+else
+	__main "$@";
+	exit $?;
+fi;
