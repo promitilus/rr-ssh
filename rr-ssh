@@ -2,7 +2,7 @@
 #
 # PROGRAM	: rr-ssh
 # PURPOSE	: SSH wrapper for simple fault-tolerant remote connections
-#			and destiation discovery using DNS SRV records
+#			and destination discovery using DNS SRV records
 # AUTHOR	: Samuel Behan <samuel.behan(at)dob(dot)sk> (c) 2019-2020
 # HOMEPAGE	: https://github.com/promitilus/rr-ssh
 # LICENSE	: GNU GPL v3 or later (see file LICENSE)
@@ -37,8 +37,8 @@ function rr_ssh() {
 
 	host="${dest%:*}";
 	port="${dest#*:}";
-	local -a ssh_args=("$@" "-o" "HostName=$host" "-o" "ConnectTimeout=$RR_SSH_CONNECT_TIMEOUT");
-	[ -n "$port" -a "$host" != "$port" ] && ssh_args=("${ssh_args[@]}" "-o" "Port=$port");
+	local -a ssh_args=("-o" "HostName=$host" "-o" "ConnectTimeout=$RR_SSH_CONNECT_TIMEOUT" "$@");
+	[ -n "$port" -a "$host" != "$port" ] && ssh_args=("-o" "Port=$port" "${ssh_args[@]}");
 
 	[ "$RR_SSH_VERBOSE" = "1" ] && echo "rr-ssh: executing ssh ${ssh_args[@]}" >&2;
 	ssh "${ssh_args[@]}";
